@@ -1,10 +1,6 @@
-import { pipeline } from 'node:stream';
-import { Telegraf, Context, Telegram, deunionize } from 'telegraf';
-import { promisify } from 'node:util';
+import { Telegram } from 'telegraf';
 import * as fs from 'node:fs';
-import fetch from 'node-fetch';
 import { catFromExt, getFileName } from './helper';
-import { WizardContext } from 'telegraf/typings/scenes';
 import { SAVE_PATH } from '../../app';
 
 export const saveFile = async function (
@@ -23,27 +19,31 @@ export const saveFile = async function (
       fileName = ctx.update.message.document.file_name;
     } else throw new Error('Unexpected download scenario');
 
-    console.log(ctx.update.message);
     const { href: fileLink } = await telegramInstance.getFileLink(fileId);
 
-    console.log(fileLink);
     const fileExt = fileLink.split('.').at(-1)?.toLowerCase();
 
     const res = await fetch(fileLink);
+    if (!res.ok) throw new Error('URL is invalid');
 
-    if (!fileName) fileName = getFileName(fileLink) + '.' + fileExt;
+    const fileContent = await res.body?.getReader().read();
 
-    !fileName ? (fileName = getFileName(fileLink) + '.' + fileExt) : '';
-    // const filename = getFileName(fileLink) + '.' + fileExt;
+    if (typeof fileName === 'undefined')
+      fileName = getFileName(fileLink) + '.' + fileExt;
+
     const folder = catFromExt(fileExt);
-    console.log(SAVE_PATH, folder, fileName);
 
-    const streamPipeline = promisify(pipeline);
-    await streamPipeline(
-      res.body,
-      fs.createWriteStream(`${SAVE_PATH}/${folder}/${fileName}`)
-    );
+    if (!fileContent) return;
+
+    const writtenFile: string = await new Promise((res, rej) => {
+      fs.createWriteStream(`${SAVE_PATH}/${folder}/${fileName}`).write(
+        fileContent.value,
+        (err) => (err ? rej(err) : res(fileName as string))
+      );
+    });
+
+    console.log(`File ${writtenFile} saved`);
   } catch (err) {
-    throw new Error('Problem downloading the file' + err);
+    throw new Error('Problem downloading the file\n' + err);
   }
 };
